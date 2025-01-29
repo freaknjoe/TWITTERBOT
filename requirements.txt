@@ -1,7 +1,8 @@
-Flask
+flask
 tweepy
 requests
 python-dotenv
 transformers
 torch
 tokenizers
+gunicorn
