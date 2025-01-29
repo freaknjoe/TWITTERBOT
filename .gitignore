@@ -1,0 +1,17 @@
+# OS generated files
+.DS_Store
+.localized
+
+# Environment files
+.env
+.env.example
+
+# IDE specific files
+.idea/
+*.swp
+*.swo
+
+# Image files
+*.jpg
+*.png
+*.gif
