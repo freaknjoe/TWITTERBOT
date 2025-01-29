@@ -5,11 +5,8 @@ import logging
 import requests
 from flask import Flask
 import tweepy
-from datetime import datetime
 from PIL import Image
 import threading
-import re
-import openai
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -24,7 +21,7 @@ def home():
 
 def start_flask():
     port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
 
 # Fetch credentials from environment variables
 API_KEY = os.getenv('TWITTER_API_KEY')
@@ -62,7 +59,8 @@ client_v2 = tweepy.Client(
 )
 
 # Set OpenAI API key
-openai.api_key = OPENAI_API_KEY
+import openai
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # Function to load prompts from a file
 def load_prompts(file_path):
@@ -101,7 +99,7 @@ def fetch_cryptopanic_topics():
 def call_openai(prompt, model="gpt-3.5-turbo"):
     """Fetch a response from OpenAI API."""
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
@@ -111,41 +109,32 @@ def call_openai(prompt, model="gpt-3.5-turbo"):
             temperature=0.7,
             top_p=0.9
         )
+        logger.debug(f"OpenAI Response: {response}")
         return response.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"Error calling OpenAI API: {e}")
         return None
 
-def chunk_text(text, chunk_size=1000):
-    """Chunk the text into smaller sections of specified size."""
-    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
-
 def summarize_text(text):
     """Summarize the given text into a concise version using OpenAI, ensuring it's 280 characters or less."""
     try:
-        # Split the text into chunks if it's too long
-        chunks = chunk_text(text)
-        summaries = []
-
-        for chunk in chunks:
-            prompt = f"Summarize the following text in 280 characters or less: {chunk}"
-            summary = call_openai(prompt, model="gpt-3.5-turbo")
-            if summary:
-                summaries.append(summary)
-
-        # Combine all summaries into one
-        combined_summary = " ".join(summaries)
-
-        # Ensure the combined summary is within 280 characters
-        if len(combined_summary) > 280:
-            combined_summary = combined_summary[:280]
-
-        # Final check to ensure the summary is not empty
-        if not combined_summary:
-            logger.warning("Summarization failed or exceeded character limit.")
+        if not text:
+            logger.warning("Empty text provided for summarization.")
             return None
 
-        return combined_summary
+        prompt = f"Summarize the following text in 280 characters or less. Make it engaging and suitable for Twitter:\n\n{text}"
+        summary = call_openai(prompt)
+        
+        if not summary:
+            logger.warning("Summarization failed. Using fallback.")
+            return None
+
+        if len(summary) > 280:
+            logger.warning("Summarization exceeded character limit. Trimming text.")
+            summary = summary[:277] + "..."
+            
+        logger.info(f"Successful summarization: {summary}")
+        return summary
 
     except Exception as e:
         logger.error(f"Error summarizing text: {e}")
@@ -176,33 +165,30 @@ def generate_and_post_tweet(base_prompt, category="general_crypto"):
     """Generate a detailed text, summarize it to 280 characters or less, and post as a tweet."""
     try:
         # Generate detailed text
-        detailed_text = call_openai(base_prompt, model="gpt-3.5-turbo")
+        detailed_text = call_openai(base_prompt)
+        logger.debug(f"Generated Text: {detailed_text}")
+        
         if not detailed_text:
             logger.warning("Failed to generate detailed text. Using fallback.")
-            detailed_text = get_fallback_prompt(category)
-        
-        # Summarize the detailed text to 280 characters or less
-        summarized_text = summarize_text(detailed_text)
-        if not summarized_text:
-            logger.warning("Summarization failed. Using fallback prompt.")
             final_tweet = get_fallback_prompt(category)
         else:
-            final_tweet = summarized_text
+            # Summarize the detailed text
+            summarized_text = summarize_text(detailed_text)
+            final_tweet = summarized_text if summarized_text else get_fallback_prompt(category)
 
-        # Ensure the final tweet is 280 characters or less
-        if len(final_tweet) > 280:
-            logger.warning("Final tweet exceeds 280 characters. Using fallback.")
-            final_tweet = get_fallback_prompt(category)
-
-        # If the final tweet is still too long, use a short fallback
-        if len(final_tweet) > 280:
+        if not final_tweet:
+            logger.error("No valid tweet generated. Using emergency fallback.")
             final_tweet = random.choice([
                 "Crypto is wild today! 🚀 #CryptoChat",
                 "AI is changing everything! 🤖 #CryptoTech",
                 "DeFi is the future! 📈 #DeFiInsight",
                 "Memecoins are here to stay! 🐕 #MemeCoins",
             ])
-            logger.warning("Using short fallback tweet.")
+
+        # Ensure the final tweet is 280 characters or less
+        if len(final_tweet) > 280:
+            logger.warning("Final tweet exceeds 280 characters. Using fallback.")
+            final_tweet = get_fallback_prompt(category)
 
         logger.info(f"Final tweet: {final_tweet}")
         
@@ -210,20 +196,16 @@ def generate_and_post_tweet(base_prompt, category="general_crypto"):
 
         # Append $FEDJA reference if applicable
         if category == "fedja":
-            # Randomly choose between including the contract address or Twitter tag
             reference_type = random.choice(["contract", "twitter"])
-            
             if reference_type == "contract":
                 fedja_reference = f"\n\n$FEDJA | {FEDJA_CONTRACT_ADDRESS} 🐕 #FedjaFren"
             else:
                 fedja_reference = f"\n\nCheck out {FEDJA_TWITTER_TAG} for more info! 🐕 #FedjaMoon"
             
-            # Ensure the final tweet does not exceed 280 characters
             if len(final_tweet) + len(fedja_reference) <= 280:
                 final_tweet += fedja_reference
                 logger.info(f"Updated tweet with $FEDJA reference: {final_tweet}")
             else:
-                # If the reference cannot be added without exceeding the limit, prioritize the reference
                 max_length = 280 - len(fedja_reference)
                 final_tweet = final_tweet[:max_length] + fedja_reference
                 logger.info(f"Adjusted tweet to include $FEDJA reference: {final_tweet}")
@@ -248,13 +230,20 @@ def post_tweet(text, image_path=None):
             # Post text-only tweet using Twitter API v2
             response = client_v2.create_tweet(text=text)
         
+        # Log the full response for debugging
+        logger.debug(f"Twitter API Response: {response}")
+
         # Access the tweet ID from the response dictionary
-        if response and response.data:
-            tweet_id = response.data['id']
-            logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
-            return tweet_id
+        if response and isinstance(response, dict) and 'data' in response and isinstance(response['data'], dict):
+            tweet_id = response['data'].get('id', None)
+            if tweet_id:
+                logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
+                return tweet_id
+            else:
+                logger.error("Invalid response from Twitter API. No tweet ID found in response data.")
+                return None
         else:
-            logger.error("Invalid response from Twitter API. No tweet data found.")
+            logger.error(f"Invalid response from Twitter API. Response type: {type(response).__name__}")
             return None
     except tweepy.TweepyException as e:
         logger.error(f"Error posting tweet: {e}")
@@ -274,28 +263,26 @@ def post_fedja_tweet():
 def post_regular_tweet():
     """Post a tweet about crypto, AI, or DeFi using trending topics from CryptoPanic and OpenAI summarization."""
     try:
-        # Fetch trending topics from CryptoPanic
         topics = fetch_cryptopanic_topics()
         if not topics:
             logger.warning("No trending topics found. Using fallback prompt.")
             generate_and_post_tweet(get_fallback_prompt("general_crypto"), category="general_crypto")
             return
 
-        # Concatenate topics into a single string
         topics_text = "\n".join(topics)
-
-        # Create a prompt to summarize the topics
         prompt = f"Summarize the following trending crypto topics into a single, witty, mildly sarcastic paragraph under 280 characters:\n{topics_text}\n#CryptoChat"
+        summarized_text = call_openai(prompt)
         
-        # Generate the summarized text
-        summarized_text = call_openai(prompt, model="gpt-3.5-turbo")
-        
-        if not summarized_text or len(summarized_text) > 280:
-            logger.warning("Summarization failed or exceeded character limit. Using fallback prompt.")
+        if not summarized_text:
+            logger.warning("Summarization failed. Using fallback prompt.")
             generate_and_post_tweet(get_fallback_prompt("general_crypto"), category="general_crypto")
             return
 
-        # Post the summarized tweet
+        if len(summarized_text) > 280:
+            logger.warning("Summarization exceeded character limit. Using fallback prompt.")
+            generate_and_post_tweet(get_fallback_prompt("general_crypto"), category="general_crypto")
+            return
+
         post_tweet(summarized_text, image_path=None)
 
     except Exception as e:
@@ -306,21 +293,15 @@ def run_bot():
     """Main bot loop."""
     logger.info("Starting the bot.")
     while True:
-        # Randomly select action with 20% chance for $FEDJA posts
-        if random.random() < 0.2:
-            action = "fedja_tweet"
-        else:
-            action = "regular_tweet"
-        
+        action = "fedja_tweet" if random.random() < 0.2 else "regular_tweet"
         logger.info(f"Selected action: {action}")
 
         if action == "fedja_tweet":
             post_fedja_tweet()
-            time.sleep(43200)  # Post about $FEDJA every 12 hours
-
+            time.sleep(43200)
         elif action == "regular_tweet":
             post_regular_tweet()
-            time.sleep(1800)  # Sleep for 30 minutes
+            time.sleep(1800)
 
 if __name__ == "__main__":
     threading.Thread(target=start_flask, daemon=True).start()
