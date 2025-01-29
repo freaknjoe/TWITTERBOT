@@ -5,8 +5,8 @@ import logging
 import requests
 from flask import Flask
 import tweepy
-from PIL import Image
 import threading
+from openai import OpenAI
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,7 +34,7 @@ CRYPTOPANIC_API_KEY = os.getenv('CRYPTOPANIC_API_KEY')
 # Constants for $FEDJA
 FEDJA_CONTRACT_ADDRESS = "9oDw3Q36a8mVHfPCSmxYBXE9iLeJjsCYu97JGpPwDvVZ"
 FEDJA_TWITTER_TAG = "@Fedja_SOL"
-IMAGES_FOLDER = "images"  # Folder containing images for posts
+IMAGES_FOLDER = "images"  # Folder containing images for $FEDJA tweets
 
 # Validate API credentials
 if not all([API_KEY, API_SECRET_KEY, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, OPENAI_API_KEY, CRYPTOPANIC_API_KEY]):
@@ -58,43 +58,29 @@ client_v2 = tweepy.Client(
     access_token_secret=ACCESS_TOKEN_SECRET
 )
 
-# Set OpenAI API key
-import openai
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-# Function to load prompts from a file
-def load_prompts(file_path):
-    """Load prompts from a specified file into a list."""
-    try:
-        with open(file_path, 'r') as file:
-            prompts = [line.strip() for line in file if line.strip()]
-        return prompts
-    except Exception as e:
-        logger.error(f"Error reading {file_path}: {e}")
-        return []
-
-# Load prompts from files
-FEDJA_PROMPTS = load_prompts('fedja_prompts.txt')
-GENERAL_CRYPTO_PROMPTS = load_prompts('general_crypto_prompts.txt')
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def fetch_cryptopanic_topics():
-    """Fetch trending topics from CryptoPanic filtered for relevant categories."""
+    """Fetch trending topics from CryptoPanic, limited to 5 posts for efficiency."""
     try:
-        url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}"
+        url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}&kind=news&filter=rising&limit=5"
         response = requests.get(url)
         response.raise_for_status()
 
-        # Extract relevant topics
         results = response.json().get("results", [])
-        relevant_topics = [
-            item["title"] for item in results if any(
-                keyword in item["title"].lower() for keyword in ["memecoin", "defi", "ai", "defiai", "btc", "eth", "solana"]
-            )
-        ]
-        return relevant_topics[:5]
+        relevant_topics = [item["title"] for item in results][:5]  # Limit to 5 topics
+
+        if not relevant_topics:
+            logger.warning("No relevant trending topics found. Using fallback.")
+            return ["Crypto is buzzing! Stay tuned for the latest updates. 🚀"]
+
+        logger.info(f"Retrieved {len(relevant_topics)} topics from CryptoPanic.")
+        return relevant_topics
+
     except Exception as e:
         logger.error(f"Error fetching topics from CryptoPanic: {e}")
-        return []
+        return ["Error fetching crypto news. Markets are wild! 🚀"]
 
 def call_openai(prompt, model="gpt-3.5-turbo"):
     """Fetch a response from OpenAI API."""
@@ -105,36 +91,28 @@ def call_openai(prompt, model="gpt-3.5-turbo"):
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
+            max_tokens=250,
             temperature=0.7,
             top_p=0.9
         )
-        logger.debug(f"OpenAI Response: {response}")
         return response.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"Error calling OpenAI API: {e}")
         return None
 
 def summarize_text(text):
-    """Summarize the given text into a concise version using OpenAI, ensuring it's 280 characters or less."""
+    """Ensure the text remains under 280 characters and is suitable for Twitter."""
     try:
         if not text:
             logger.warning("Empty text provided for summarization.")
             return None
 
-        prompt = f"Summarize the following text in 280 characters or less. Make it engaging and suitable for Twitter:\n\n{text}"
-        summary = call_openai(prompt)
-        
-        if not summary:
-            logger.warning("Summarization failed. Using fallback.")
-            return None
+        if len(text) > 280:
+            logger.warning("Text exceeded 280 characters. Trimming gracefully.")
+            text = text[:277] + "..."
 
-        if len(summary) > 280:
-            logger.warning("Summarization exceeded character limit. Trimming text.")
-            summary = summary[:277] + "..."
-            
-        logger.info(f"Successful summarization: {summary}")
-        return summary
+        logger.info(f"Final summarized text: {text}")
+        return text
 
     except Exception as e:
         logger.error(f"Error summarizing text: {e}")
@@ -152,156 +130,67 @@ def select_random_image():
         logger.error(f"Error selecting random image: {e}")
         return None
 
-def get_fallback_prompt(category):
-    """Get a random fallback prompt from the specified category."""
-    if category == "fedja":
-        return random.choice(FEDJA_PROMPTS) if FEDJA_PROMPTS else "Default $FEDJA prompt."
-    elif category == "general_crypto":
-        return random.choice(GENERAL_CRYPTO_PROMPTS) if GENERAL_CRYPTO_PROMPTS else "Default general crypto prompt."
-    else:
-        return "Default prompt."
-
-def generate_and_post_tweet(base_prompt, category="general_crypto"):
-    """Generate a detailed text, summarize it to 280 characters or less, and post as a tweet."""
-    try:
-        # Generate detailed text
-        detailed_text = call_openai(base_prompt)
-        logger.debug(f"Generated Text: {detailed_text}")
-        
-        if not detailed_text:
-            logger.warning("Failed to generate detailed text. Using fallback.")
-            final_tweet = get_fallback_prompt(category)
-        else:
-            # Summarize the detailed text
-            summarized_text = summarize_text(detailed_text)
-            final_tweet = summarized_text if summarized_text else get_fallback_prompt(category)
-
-        if not final_tweet:
-            logger.error("No valid tweet generated. Using emergency fallback.")
-            final_tweet = random.choice([
-                "Crypto is wild today! 🚀 #CryptoChat",
-                "AI is changing everything! 🤖 #CryptoTech",
-                "DeFi is the future! 📈 #DeFiInsight",
-                "Memecoins are here to stay! 🐕 #MemeCoins",
-            ])
-
-        # Ensure the final tweet is 280 characters or less
-        if len(final_tweet) > 280:
-            logger.warning("Final tweet exceeds 280 characters. Using fallback.")
-            final_tweet = get_fallback_prompt(category)
-
-        logger.info(f"Final tweet: {final_tweet}")
-        
-        image_path = None
-
-        # Append $FEDJA reference if applicable
-        if category == "fedja":
-            reference_type = random.choice(["contract", "twitter"])
-            if reference_type == "contract":
-                fedja_reference = f"\n\n$FEDJA | {FEDJA_CONTRACT_ADDRESS} 🐕 #FedjaFren"
-            else:
-                fedja_reference = f"\n\nCheck out {FEDJA_TWITTER_TAG} for more info! 🐕 #FedjaMoon"
-            
-            if len(final_tweet) + len(fedja_reference) <= 280:
-                final_tweet += fedja_reference
-                logger.info(f"Updated tweet with $FEDJA reference: {final_tweet}")
-            else:
-                max_length = 280 - len(fedja_reference)
-                final_tweet = final_tweet[:max_length] + fedja_reference
-                logger.info(f"Adjusted tweet to include $FEDJA reference: {final_tweet}")
-
-        # Post the tweet
-        post_tweet(final_tweet, image_path)
-
-    except Exception as e:
-        logger.error(f"Error in generate_and_post_tweet: {e}")
-        return None
-
 def post_tweet(text, image_path=None):
-    """Post a tweet with error handling."""
+    """Post a tweet with optional media (image)."""
     try:
-        logger.info(f"Attempting to post tweet: {text}")
+        logger.info(f"Posting tweet: {text}")
+
         if image_path:
-            # Upload media using Twitter API v1.1
+            logger.info(f"Uploading image: {image_path}")
             media = api_v1.media_upload(filename=image_path)
-            # Post tweet with media using Twitter API v2
-            response = client_v2.create_tweet(text=text, media_ids=[media.media_id_string])
+            media_id = media.media_id_string
+
+            response = client_v2.create_tweet(text=text, media_ids=[media_id])
         else:
-            # Post text-only tweet using Twitter API v2
             response = client_v2.create_tweet(text=text)
-        
-        # Log the full response for debugging
+
         logger.debug(f"Twitter API Response: {response}")
 
-        # Access the tweet ID from the response dictionary
-        if response and isinstance(response, dict) and 'data' in response and isinstance(response['data'], dict):
-            tweet_id = response['data'].get('id', None)
-            if tweet_id:
-                logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
-                return tweet_id
-            else:
-                logger.error("Invalid response from Twitter API. No tweet ID found in response data.")
-                return None
+        if response and 'data' in response and 'id' in response['data']:
+            tweet_id = response['data']['id']
+            logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
+            return tweet_id
         else:
-            logger.error(f"Invalid response from Twitter API. Response type: {type(response).__name__}")
+            logger.error("Failed to get Tweet ID from Twitter API response.")
             return None
+
     except tweepy.TweepyException as e:
         logger.error(f"Error posting tweet: {e}")
         return None
 
 def post_fedja_tweet():
-    """Post a positive and witty tweet about $FEDJA with an image."""
-    image_path = select_random_image()
-    if image_path:
-        base_prompt = f"Create a detailed, positive, and witty paragraph about $FEDJA, a memecoin on Solana. Discuss its potential, community, and recent developments. Keep it under 280 characters. #FedjaFren"
-        generate_and_post_tweet(base_prompt, category="fedja")
+    """Post a witty tweet about $FEDJA with a random image if available."""
+    prompt = f"Create a short, engaging, and witty tweet about $FEDJA, a memecoin on Solana. Keep it under 250 characters. #FedjaMoon"
+    text = summarize_text(call_openai(prompt))
+
+    if not text:
+        text = "FEDJA is mooning! 🚀🐕 #FedjaFren"
+
+    fedja_reference = f"\n\n$FEDJA | {FEDJA_CONTRACT_ADDRESS} 🐕 #FedjaMoon"
+
+    if len(text) + len(fedja_reference) <= 280:
+        text += fedja_reference
     else:
-        logger.warning("No images found in the images folder. Posting without image.")
-        base_prompt = f"Create a detailed, positive, and witty paragraph about $FEDJA, a memecoin on Solana. Discuss its potential, community, and recent developments. Keep it under 280 characters. #FedjaMoon"
-        generate_and_post_tweet(base_prompt, category="fedja")
+        text = text[:280 - len(fedja_reference)] + fedja_reference
 
-def post_regular_tweet():
-    """Post a tweet about crypto, AI, or DeFi using trending topics from CryptoPanic and OpenAI summarization."""
-    try:
-        topics = fetch_cryptopanic_topics()
-        if not topics:
-            logger.warning("No trending topics found. Using fallback prompt.")
-            generate_and_post_tweet(get_fallback_prompt("general_crypto"), category="general_crypto")
-            return
-
-        topics_text = "\n".join(topics)
-        prompt = f"Summarize the following trending crypto topics into a single, witty, mildly sarcastic paragraph under 280 characters:\n{topics_text}\n#CryptoChat"
-        summarized_text = call_openai(prompt)
-        
-        if not summarized_text:
-            logger.warning("Summarization failed. Using fallback prompt.")
-            generate_and_post_tweet(get_fallback_prompt("general_crypto"), category="general_crypto")
-            return
-
-        if len(summarized_text) > 280:
-            logger.warning("Summarization exceeded character limit. Using fallback prompt.")
-            generate_and_post_tweet(get_fallback_prompt("general_crypto"), category="general_crypto")
-            return
-
-        post_tweet(summarized_text, image_path=None)
-
-    except Exception as e:
-        logger.error(f"Error in post_regular_tweet: {e}")
-        return None
+    # Select a random image for $FEDJA tweets
+    image_path = select_random_image()
+    
+    post_tweet(text, image_path=image_path)
 
 def run_bot():
     """Main bot loop."""
-    logger.info("Starting the bot.")
+    logger.info("Starting the bot (Live Twitter posting enabled).")
     while True:
         action = "fedja_tweet" if random.random() < 0.2 else "regular_tweet"
         logger.info(f"Selected action: {action}")
 
         if action == "fedja_tweet":
             post_fedja_tweet()
-            time.sleep(43200)
         elif action == "regular_tweet":
             post_regular_tweet()
-            time.sleep(1800)
+
+        time.sleep(1800)  # 30 min interval for live posting
 
 if __name__ == "__main__":
     threading.Thread(target=start_flask, daemon=True).start()
