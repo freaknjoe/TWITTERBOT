@@ -10,8 +10,11 @@
 .idea/
 *.swp
 *.swo
+<<<<<<< HEAD
 
 # Image files
 *.jpg
 *.png
 *.gif
+=======
+>>>>>>> 0eb43ba (Initial commit in the correct directory)

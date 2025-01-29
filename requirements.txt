@@ -1,0 +1,7 @@
+Flask==2.0.1
+tweepy==4.6.0
+requests>=2.27.0
+python-dotenv==0.19.0
+transformers==4.21.3
+torch==2.5.1
+tokenizers @ https://dl.bintray.com/pypa/manylinux_2_24_x86_64/ea/1b/8a/tokenizers-0.12.1-cp311-cp311-manylinux_2_24_x86_64.whl
