@@ -61,6 +61,20 @@ client_v2 = tweepy.Client(
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+def load_prompts(file_path):
+    """Load prompts from a specified file into a list."""
+    try:
+        with open(file_path, 'r') as file:
+            prompts = [line.strip() for line in file if line.strip()]
+        return prompts
+    except Exception as e:
+        logger.error(f"Error reading {file_path}: {e}")
+        return []
+
+# Load prompts from text files
+FEDJA_PROMPTS = load_prompts('fedja_prompts.txt')
+GENERAL_CRYPTO_PROMPTS = load_prompts('general_crypto_prompts.txt')
+
 def fetch_cryptopanic_topics():
     """Fetch trending topics from CryptoPanic, limited to 5 posts for efficiency."""
     try:
@@ -73,14 +87,14 @@ def fetch_cryptopanic_topics():
 
         if not relevant_topics:
             logger.warning("No relevant trending topics found. Using fallback.")
-            return ["Crypto is buzzing! Stay tuned for the latest updates. 🚀"]
+            return GENERAL_CRYPTO_PROMPTS if GENERAL_CRYPTO_PROMPTS else ["Crypto is buzzing! 🚀"]
 
         logger.info(f"Retrieved {len(relevant_topics)} topics from CryptoPanic.")
         return relevant_topics
 
     except Exception as e:
         logger.error(f"Error fetching topics from CryptoPanic: {e}")
-        return ["Error fetching crypto news. Markets are wild! 🚀"]
+        return GENERAL_CRYPTO_PROMPTS if GENERAL_CRYPTO_PROMPTS else ["Crypto is buzzing! 🚀"]
 
 def call_openai(prompt, model="gpt-3.5-turbo"):
     """Fetch a response from OpenAI API."""
@@ -102,30 +116,19 @@ def call_openai(prompt, model="gpt-3.5-turbo"):
 
 def summarize_text(text):
     """Ensure the text remains under 280 characters and is suitable for Twitter."""
-    try:
-        if not text:
-            logger.warning("Empty text provided for summarization.")
-            return None
-
-        if len(text) > 280:
-            logger.warning("Text exceeded 280 characters. Trimming gracefully.")
-            text = text[:277] + "..."
-
-        logger.info(f"Final summarized text: {text}")
-        return text
-
-    except Exception as e:
-        logger.error(f"Error summarizing text: {e}")
+    if not text:
         return None
+
+    if len(text) > 280:
+        text = text[:277] + "..."
+
+    return text
 
 def select_random_image():
     """Select a random image from the images folder."""
     try:
         images = [os.path.join(IMAGES_FOLDER, img) for img in os.listdir(IMAGES_FOLDER) if img.endswith(('.png', '.jpg', '.jpeg'))]
-        if not images:
-            logger.warning("No images found in the images folder.")
-            return None
-        return random.choice(images)
+        return random.choice(images) if images else None
     except Exception as e:
         logger.error(f"Error selecting random image: {e}")
         return None
@@ -136,61 +139,48 @@ def post_tweet(text, image_path=None):
         logger.info(f"Posting tweet: {text}")
 
         if image_path:
-            logger.info(f"Uploading image: {image_path}")
             media = api_v1.media_upload(filename=image_path)
-            media_id = media.media_id_string
-
-            response = client_v2.create_tweet(text=text, media_ids=[media_id])
+            response = client_v2.create_tweet(text=text, media_ids=[media.media_id_string])
         else:
             response = client_v2.create_tweet(text=text)
 
-        logger.debug(f"Twitter API Response: {response}")
-
         if response and 'data' in response and 'id' in response['data']:
-            tweet_id = response['data']['id']
-            logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
-            return tweet_id
-        else:
-            logger.error("Failed to get Tweet ID from Twitter API response.")
-            return None
-
+            logger.info(f"Tweet posted successfully! Tweet ID: {response['data']['id']}")
     except tweepy.TweepyException as e:
         logger.error(f"Error posting tweet: {e}")
-        return None
 
 def post_fedja_tweet():
-    """Post a witty tweet about $FEDJA with a random image if available."""
-    prompt = f"Create a short, engaging, and witty tweet about $FEDJA, a memecoin on Solana. Keep it under 250 characters. #FedjaMoon"
+    """Post a $FEDJA tweet with an image if available."""
+    prompt = f"Write a fun, engaging $FEDJA tweet under 250 characters. #FedjaMoon"
     text = summarize_text(call_openai(prompt))
 
     if not text:
-        text = "FEDJA is mooning! 🚀🐕 #FedjaFren"
+        text = random.choice(FEDJA_PROMPTS) if FEDJA_PROMPTS else "FEDJA is mooning! 🚀🐕 #FedjaFren"
 
     fedja_reference = f"\n\n$FEDJA | {FEDJA_CONTRACT_ADDRESS} 🐕 #FedjaMoon"
+    text = text[:280 - len(fedja_reference)] + fedja_reference if len(text) + len(fedja_reference) > 280 else text + fedja_reference
 
-    if len(text) + len(fedja_reference) <= 280:
-        text += fedja_reference
-    else:
-        text = text[:280 - len(fedja_reference)] + fedja_reference
+    post_tweet(text, image_path=select_random_image())
 
-    # Select a random image for $FEDJA tweets
-    image_path = select_random_image()
-    
-    post_tweet(text, image_path=image_path)
+def post_regular_tweet():
+    """Post a general crypto tweet from CryptoPanic or fallback prompts."""
+    topics = fetch_cryptopanic_topics()
+    selected_topic = random.choice(topics)
+
+    prompt = f"Write a short, engaging tweet under 250 characters about:\n\n{selected_topic}"
+    text = summarize_text(call_openai(prompt))
+
+    if not text:
+        text = random.choice(GENERAL_CRYPTO_PROMPTS) if GENERAL_CRYPTO_PROMPTS else "Crypto is wild today! 🚀 #CryptoChat"
+
+    post_tweet(text)
 
 def run_bot():
     """Main bot loop."""
-    logger.info("Starting the bot (Live Twitter posting enabled).")
     while True:
         action = "fedja_tweet" if random.random() < 0.2 else "regular_tweet"
-        logger.info(f"Selected action: {action}")
-
-        if action == "fedja_tweet":
-            post_fedja_tweet()
-        elif action == "regular_tweet":
-            post_regular_tweet()
-
-        time.sleep(1800)  # 30 min interval for live posting
+        post_fedja_tweet() if action == "fedja_tweet" else post_regular_tweet()
+        time.sleep(10800)  # 3 hours interval
 
 if __name__ == "__main__":
     threading.Thread(target=start_flask, daemon=True).start()
