@@ -318,8 +318,10 @@ def run_bot():
 
         generate_and_post_tweet(selected_topic, simulate_posting=simulate_posting)
 
-        # Sleep for the specified interval
-        time.sleep(1800)  # 30 min interval for live posting
+        # Sleep for a random interval between 3 and 4 hours
+        sleep_interval = random.randint(10800, 14400)  # Random delay in seconds (3 to 4 hours)
+        logger.info(f"Sleeping for {sleep_interval} seconds ({sleep_interval / 3600:.2f} hours)")
+        time.sleep(sleep_interval)
 
 if __name__ == "__main__":
     threading.Thread(target=start_flask, daemon=True).start()
