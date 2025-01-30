@@ -4,3 +4,4 @@ tweepy
 openai
 requests
 python-dotenv
+gunicorn
