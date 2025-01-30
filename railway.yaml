@@ -7,4 +7,4 @@ services:
     plan: 'free'
     branch: main
     healthcheckPath: /
-    startCommand: gunicorn app:app --bind 0.0.0.0:3000 --workers 1
+    startCommand: gunicorn flask_app:app --bind 0.0.0.0:8080 --workers 1
