@@ -1,0 +1,9 @@
+services:
+- type: web
+  name: cryptosocialbot
+  env: python
+  region: oregon
+  plan: free
+  branch: main
+  healthcheckPath: /
+  startCommand: gunicorn app:app --bind 0.0.0.0:3000 --workers 1
