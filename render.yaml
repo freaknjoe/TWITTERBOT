@@ -1,9 +1,26 @@
 services:
-- type: web
-  name: cryptosocialbot
-  env: python
-  region: oregon
-  plan: free
-  branch: main
-  healthcheckPath: /
-  startCommand: gunicorn app:app --bind 0.0.0.0:3000 --workers 1
+  - type: web
+    name: cryptosocialbot  # Change this if needed
+    env: python
+    region: ohio  # Use 'ohio' or 'virginia' for East Coast, 'oregon' for West Coast
+    plan: free  # Change to 'starter' or 'pro' if you need more resources
+    branch: main  # Change if using a different branch
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn flask_app:app --bind 0.0.0.0:8080 --workers 1
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: TWITTER_API_KEY
+        sync: false
+      - key: TWITTER_API_SECRET_KEY
+        sync: false
+      - key: TWITTER_ACCESS_TOKEN
+        sync: false
+      - key: TWITTER_ACCESS_TOKEN_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CRYPTOPANIC_API_KEY
+        sync: false
