@@ -1,0 +1,24 @@
+{
+    "topics": [
+        {
+            "name": "fedja",
+            "probability": 0.3,
+            "prompt_template": "Create a concise, positive, and witty paragraph about $FEDJA, a memecoin on Solana. Highlight its potential, community, and recent developments in under 250 characters. #FedjaFren",
+            "image_folder": "images",
+            "fallback_file": "fedja_fallback_prompts.txt",
+            "reference": {
+                "contract": "$FEDJA | 9oDw3Q36a8mVHfPCSmxYBXE9iLeJjsCYu97JGpPwDvVZ 🐕 #FedjaFren",
+                "twitter": "Check out @Fedja_SOL for more info! 🐕 #FedjaMoon"
+            }
+        },
+        {
+            "name": "general_crypto",
+            "probability": 0.7,
+            "prompt_template": "Write a short, engaging, and witty tweet (under 250 characters) about this crypto topic:\n\n{TRENDING_TOPIC}\n\nKeep it fun, informative, and relevant for Twitter. No long paragraphs!",
+            "image_folder": null,
+            "fallback_file": "general_crypto_fallback_prompts.txt",
+            "reference": null
+        }
+    ],
+    "simulate_posting": false
+}

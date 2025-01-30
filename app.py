@@ -3,10 +3,11 @@ import random
 import time
 import logging
 import requests
+import json
 from flask import Flask
-import tweepy
 import threading
 from openai import OpenAI
+import tweepy
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -30,11 +31,6 @@ ACCESS_TOKEN = os.getenv('TWITTER_ACCESS_TOKEN')
 ACCESS_TOKEN_SECRET = os.getenv('TWITTER_ACCESS_TOKEN_SECRET')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 CRYPTOPANIC_API_KEY = os.getenv('CRYPTOPANIC_API_KEY')
-
-# Constants for $FEDJA
-FEDJA_CONTRACT_ADDRESS = "9oDw3Q36a8mVHfPCSmxYBXE9iLeJjsCYu97JGpPwDvVZ"
-FEDJA_TWITTER_TAG = "@Fedja_SOL"
-IMAGES_FOLDER = "images"  # Folder containing images for $FEDJA tweets
 
 # Validate API credentials
 if not all([API_KEY, API_SECRET_KEY, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, OPENAI_API_KEY, CRYPTOPANIC_API_KEY]):
@@ -107,89 +103,222 @@ def summarize_text(text):
             logger.warning("Empty text provided for summarization.")
             return None
 
-        if len(text) > 280:
-            logger.warning("Text exceeded 280 characters. Trimming gracefully.")
-            text = text[:277] + "..."
-
-        logger.info(f"Final summarized text: {text}")
+        # Allow the text to be slightly longer before truncating
+        max_length = 270  # This allows room for an ellipsis or other additions
+        
+        if len(text) > max_length:
+            logger.warning("Text exceeded 270 characters. Trimming gracefully.")
+            
+            # Find the last sentence or a natural breaking point
+            last_period = text.rfind('.', 0, max_length)
+            last_exclamation = text.rfind('!', 0, max_length)
+            last_question = text.rfind('?', 0, max_length)
+            
+            # Find the last of any sentence-ending punctuation
+            last_punctuation = max(last_period, last_exclamation, last_question)
+            
+            if last_punctuation != -1:
+                # Use the furthest punctuation mark
+                end = max(last_period, last_exclamation, last_question) + 1
+                text = text[:end] + "..."
+            else:
+                # If no sentence-ending punctuation is found, find the last space
+                last_space = text.rfind(' ', 0, max_length)
+                if last_space != -1:
+                    text = text[:last_space] + "..."
+                else:
+                    # If no spaces found, truncate at max_length
+                    text = text[:max_length] + "..."
+            
+            logger.info(f"Final summarized text: {text}")
+            logger.info(f"Length of summarized text: {len(text)}")
+            
+        logger.info(f"Length of original text: {len(text)}")
         return text
 
     except Exception as e:
         logger.error(f"Error summarizing text: {e}")
         return None
 
-def select_random_image():
-    """Select a random image from the images folder."""
+def select_random_image(image_folder):
+    """Select a random image from the specified image folder."""
     try:
-        images = [os.path.join(IMAGES_FOLDER, img) for img in os.listdir(IMAGES_FOLDER) if img.endswith(('.png', '.jpg', '.jpeg'))]
+        if not image_folder:
+            logger.warning("No image folder specified.")
+            return None
+
+        images = [os.path.join(image_folder, img) for img in os.listdir(image_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
         if not images:
-            logger.warning("No images found in the images folder.")
+            logger.warning("No images found in the folder.")
             return None
         return random.choice(images)
     except Exception as e:
         logger.error(f"Error selecting random image: {e}")
         return None
 
-def post_tweet(text, image_path=None):
-    """Post a tweet with optional media (image)."""
+def load_fallback_prompts(file_path):
+    """Load fallback prompts from a specified file."""
     try:
-        logger.info(f"Posting tweet: {text}")
+        with open(file_path, 'r') as file:
+            prompts = [line.strip() for line in file if line.strip()]
+        return prompts
+    except Exception as e:
+        logger.error(f"Error reading {file_path}: {e}")
+        return []
 
+def get_fallback_prompt(topic):
+    """Get a random fallback prompt from the specified topic."""
+    fallback_file = topic.get("fallback_file", "")
+    if fallback_file:
+        fallback_prompts = load_fallback_prompts(fallback_file)
+        if fallback_prompts:
+            return random.choice(fallback_prompts)
+    return "Default fallback prompt."
+
+def simulate_post_tweet(text, image_path=None):
+    """Simulate posting a tweet."""
+    try:
+        logger.info(f"Simulating tweet post: {text}")
         if image_path:
-            logger.info(f"Uploading image: {image_path}")
-            media = api_v1.media_upload(filename=image_path)
-            media_id = media.media_id_string
+            logger.info(f"Selected image: {image_path}")
+        logger.info("Tweet simulation successful.")
+    except Exception as e:
+        logger.error(f"Error simulating tweet post: {e}")
 
-            response = client_v2.create_tweet(text=text, media_ids=[media_id])
+def post_tweet(text, image_path=None, max_retries=5, initial_delay=300, simulate_posting=False):
+    """Post a tweet using Twitter API v2 with rate limiting and error handling."""
+    if simulate_posting:
+        simulate_post_tweet(text, image_path)
+        return True
+
+    retry_count = 0
+    base_delay = initial_delay  # Initial delay in seconds (5 minutes)
+
+    while retry_count < max_retries:
+        try:
+            logger.info(f"Posting tweet: {text}")
+
+            if image_path:
+                # Upload media using Twitter API v1.1
+                media = api_v1.media_upload(filename=image_path)
+                response = client_v2.create_tweet(text=text, media_ids=[media.media_id_string])
+            else:
+                # Post text-only tweet using Twitter API v2
+                response = client_v2.create_tweet(text=text)
+
+            # Log the full response for debugging
+            logger.debug(f"Twitter API Response: {response}")
+
+            if response and 'data' in response and 'id' in response['data']:
+                tweet_id = response['data']['id']
+                logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
+                return tweet_id
+            else:
+                logger.error("Failed to get Tweet ID from Twitter API response.")
+                logger.error(f"Response data: {response.get('data', {})}")
+                logger.error(f"Response errors: {response.get('errors', [])}")
+                retry_count += 1
+
+        except tweepy.TweepyException as e:
+            logger.error(f"Error posting tweet: {e}")
+            retry_count += 1
+
+            # Check if error is due to rate limits
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                logger.warning("Rate limit exceeded. Waiting longer before retrying.")
+                # Calculate exponential backoff with jitter
+                delay = base_delay * (2 ** retry_count)
+                jitter = random.uniform(0, delay)
+                total_delay = delay + jitter
+                logger.info(f"Waiting {total_delay:.2f} seconds before retry {retry_count + 1}/{max_retries}")
+                time.sleep(total_delay)
+            elif "403" in str(e) and "content" in str(e).lower():
+                logger.error("Tweet failed due to content policy violation. Will not retry.")
+                return None
+            else:
+                # For other errors, use a shorter delay
+                delay = 60  # 1 minute
+                jitter = random.uniform(0, delay)
+                total_delay = delay + jitter
+                logger.info(f"Waiting {total_delay:.2f} seconds before retry {retry_count + 1}/{max_retries}")
+                time.sleep(total_delay)
+
+            # Break the loop if max retries are reached
+            if retry_count >= max_retries:
+                logger.error(f"Max retries ({max_retries}) reached. Giving up.")
+                return None
+
+    # If we've exhausted all retries, return None
+    logger.error(f"Failed to post tweet after {max_retries} retries.")
+    return None
+
+def generate_and_post_tweet(topic, simulate_posting=False):
+    """Generate a detailed text, summarize it to 280 characters or less, and post as a tweet."""
+    try:
+        prompt_template = topic.get("prompt_template", "")
+        image_folder = topic.get("image_folder", None)
+
+        if topic["name"] == "general_crypto":
+            topics = fetch_cryptopanic_topics()
+            if not topics:
+                logger.warning("No trending topics found. Using fallback.")
+                topics = ["The crypto market is full of surprises! 🚀"]
+            selected_topic = random.choice(topics)
+            prompt = prompt_template.replace("{TRENDING_TOPIC}", selected_topic)
+            logger.info(f"Selected topic for tweet: {selected_topic}")
         else:
-            response = client_v2.create_tweet(text=text)
+            prompt = prompt_template
 
-        logger.debug(f"Twitter API Response: {response}")
+        response_text = call_openai(prompt)
 
-        if response and 'data' in response and 'id' in response['data']:
-            tweet_id = response['data']['id']
-            logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
-            return tweet_id
-        else:
-            logger.error("Failed to get Tweet ID from Twitter API response.")
-            return None
+        if not response_text:
+            logger.warning("OpenAI response failed. Using fallback.")
+            response_text = get_fallback_prompt(topic)
 
-    except tweepy.TweepyException as e:
-        logger.error(f"Error posting tweet: {e}")
-        return None
+        summarized_text = summarize_text(response_text)
 
-def post_fedja_tweet():
-    """Post a witty tweet about $FEDJA with a random image if available."""
-    prompt = f"Create a short, engaging, and witty tweet about $FEDJA, a memecoin on Solana. Keep it under 250 characters. #FedjaMoon"
-    text = summarize_text(call_openai(prompt))
+        if not summarized_text:
+            logger.warning("Summarization failed. Using fallback.")
+            summarized_text = get_fallback_prompt(topic)
 
-    if not text:
-        text = "FEDJA is mooning! 🚀🐕 #FedjaFren"
+        image_path = select_random_image(image_folder)
 
-    fedja_reference = f"\n\n$FEDJA | {FEDJA_CONTRACT_ADDRESS} 🐕 #FedjaMoon"
+        # Append reference if applicable
+        reference = topic.get("reference", None)
+        if reference:
+            reference_type = random.choice(["contract", "twitter"])
+            reference_text = reference.get(reference_type, "")
+            if len(summarized_text) + len(reference_text) <= 280:
+                summarized_text += reference_text
+                logger.info(f"Updated tweet with reference: {summarized_text}")
+            else:
+                max_length = 280 - len(reference_text)
+                summarized_text = summarized_text[:max_length] + reference_text
+                logger.info(f"Adjusted tweet to include reference: {summarized_text}")
 
-    if len(text) + len(fedja_reference) <= 280:
-        text += fedja_reference
-    else:
-        text = text[:280 - len(fedja_reference)] + fedja_reference
+        post_tweet(summarized_text, image_path, simulate_posting=simulate_posting)
 
-    # Select a random image for $FEDJA tweets
-    image_path = select_random_image()
-    
-    post_tweet(text, image_path=image_path)
+    except Exception as e:
+        logger.error(f"Error in generate_and_post_tweet: {e}")
 
 def run_bot():
     """Main bot loop."""
     logger.info("Starting the bot (Live Twitter posting enabled).")
+
+    # Load configuration
+    with open('config.json', 'r') as config_file:
+        config = json.load(config_file)
+    topics = config.get("topics", [])
+    simulate_posting = config.get("simulate_posting", False)
+
     while True:
-        action = "fedja_tweet" if random.random() < 0.2 else "regular_tweet"
-        logger.info(f"Selected action: {action}")
+        # Randomly select a topic based on probabilities
+        selected_topic = random.choices([topic for topic in topics], weights=[topic["probability"] for topic in topics])[0]
+        logger.info(f"Selected topic: {selected_topic['name']}")
 
-        if action == "fedja_tweet":
-            post_fedja_tweet()
-        elif action == "regular_tweet":
-            post_regular_tweet()
+        generate_and_post_tweet(selected_topic, simulate_posting=simulate_posting)
 
+        # Sleep for the specified interval
         time.sleep(1800)  # 30 min interval for live posting
 
 if __name__ == "__main__":
