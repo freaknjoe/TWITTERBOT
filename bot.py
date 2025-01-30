@@ -4,25 +4,12 @@ import time
 import logging
 import requests
 import json
-from flask import Flask
-import threading
 from openai import OpenAI
 import tweepy
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("CryptoSocialBot")
-
-# Flask setup
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "CryptoSocialBot is running!"
-
-def start_flask():
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
 
 # Fetch credentials from environment variables
 API_KEY = os.getenv('TWITTER_API_KEY')
@@ -322,5 +309,4 @@ def run_bot():
         time.sleep(1800)  # 30 min interval for live posting
 
 if __name__ == "__main__":
-    threading.Thread(target=start_flask, daemon=True).start()
     run_bot()
