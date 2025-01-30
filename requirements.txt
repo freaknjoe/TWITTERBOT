@@ -1,15 +1,6 @@
 flask
+gunicorn
 tweepy
+openai
 requests
 python-dotenv
-transformers
-torch
-tokenizers
-gunicorn
-pillow
-openai
-cryptography
-certifi
-urllib3
-flask-cors
-groq
