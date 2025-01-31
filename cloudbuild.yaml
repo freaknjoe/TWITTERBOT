@@ -3,3 +3,7 @@ steps:
     args: ['build', '-t', 'gcr.io/nth-infusion-449206-d6/twitter-bot-image:$COMMIT_SHA', '.']
 
 logsBucket: gs://nth-infusion-449206-d6_cloudbuild
+=======
+images:
+- 'gcr.io/nth-infusion-449206-d6/twitter-bot-image:$COMMIT_SHA'
+logsBucket: gs://twitter_github_123
