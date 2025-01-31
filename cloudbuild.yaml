@@ -1,6 +1,6 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/twitterbotimage:${COMMIT_SHA:-latest}', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/twitterbotimage:$SHORT_SHA', '.']
 images:
-  - 'gcr.io/$PROJECT_ID/twitterbotimage:${COMMIT_SHA:-latest}'
+  - 'gcr.io/$PROJECT_ID/twitterbotimage:$SHORT_SHA'
 
