@@ -1,6 +1,5 @@
-steps:  #
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/twitter-bot-image:$COMMIT_SHA', '.']
-images:
-- 'gcr.io/$PROJECT_ID/twitter-bot-image:$COMMIT_SHA'
-logsBucket: gs://twitter_github_123
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$nth-infusion-449206-d6/twitterbotimage', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$nth-infusion-449206-d6/twitterbotimage']
