@@ -1,9 +1,6 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/nth-infusion-449206-d6/twitter-bot-image:$COMMIT_SHA', '.']
-
-logsBucket: gs://nth-infusion-449206-d6_cloudbuild
-=======
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/gcr.io/$PROJECT_ID/your-image-name:$COMMIT_SHA', '.'] # Replace twitter-bot-image
 images:
-- 'gcr.io/nth-infusion-449206-d6/twitter-bot-image:$COMMIT_SHA'
+- 'gcr.io/$PROJECT_ID/gcr.io/$PROJECT_ID/your-image-name:$COMMIT_SHA'
 logsBucket: gs://twitter_github_123
