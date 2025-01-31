@@ -1,4 +1,5 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/your-image-name', '.']
-logsBucket: gs://twitter_github_123
+    args: ['build', '-t', 'gcr.io/nth-infusion-449206-d6/twitter-bot-image', '.']
+
+logsBucket: gs://nth-infusion-449206-d6_cloudbuild
