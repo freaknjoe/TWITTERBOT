@@ -1,5 +1,5 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/nth-infusion-449206-d6/twitter-bot-image', '.']
+    args: ['build', '-t', 'gcr.io/nth-infusion-449206-d6/twitter-bot-image:$COMMIT_SHA', '.']
 
 logsBucket: gs://nth-infusion-449206-d6_cloudbuild
