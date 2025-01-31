@@ -1,6 +1,6 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/gcr.io/$PROJECT_ID/your-image-name:$COMMIT_SHA', '.'] # Replace twitter-bot-image
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/myprojectimage:$COMMIT_SHA', '.']
 images:
-- 'gcr.io/$PROJECT_ID/gcr.io/$PROJECT_ID/your-image-name:$COMMIT_SHA'
+- 'gcr.io/$PROJECT_ID/myprojectimage:$COMMIT_SHA'
 logsBucket: gs://twitter_github_123
