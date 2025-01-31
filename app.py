@@ -20,8 +20,17 @@ app = Flask(__name__)
 def home():
     return "CryptoSocialBot is running!"
 
+@app.route('/run-bot', methods=['GET'])
+def run_bot_endpoint():
+    try:
+        bot.run_bot_once()
+        return "Bot executed successfully.", 200
+    except Exception as e:
+        logger.error(f"Error executing bot via endpoint: {e}")
+        return "Failed to execute bot.", 500
+
 def start_flask():
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
 
 # Fetch credentials from environment variables
@@ -119,7 +128,7 @@ def summarize_text(text):
             
             if last_punctuation != -1:
                 # Use the furthest punctuation mark
-                end = max(last_period, last_exclamation, last_question) + 1
+                end = max(last_period, last_exclamation, last_questions) + 1
                 text = text[:end] + "..."
             else:
                 # If no sentence-ending punctuation is found, find the last space
@@ -207,16 +216,16 @@ def post_tweet(text, image_path=None, max_retries=5, initial_delay=300, simulate
                 response = client_v2.create_tweet(text=text)
 
             # Log the full response for debugging
-            logger.debug(f"Twitter API Response: {response}")
+            logger.info(f"Full Twitter API Response: {response}")
 
-            if response and 'data' in response and 'id' in response['data']:
-                tweet_id = response['data']['id']
+            if response and hasattr(response, "data") and "id" in response.data:
+                tweet_id = response.data["id"]
                 logger.info(f"Tweet posted successfully! Tweet ID: {tweet_id}")
                 return tweet_id
             else:
                 logger.error("Failed to get Tweet ID from Twitter API response.")
-                logger.error(f"Response data: {response.get('data', {})}")
-                logger.error(f"Response errors: {response.get('errors', [])}")
+                logger.error(f"Response data: {getattr(response, 'data', 'No response')}")
+                logger.error(f"Response errors: {getattr(response, 'errors', 'No errors')}")
                 retry_count += 1
 
         except tweepy.TweepyException as e:
@@ -252,77 +261,126 @@ def post_tweet(text, image_path=None, max_retries=5, initial_delay=300, simulate
     logger.error(f"Failed to post tweet after {max_retries} retries.")
     return None
 
-def generate_and_post_tweet(topic, simulate_posting=False):
-    """Generate a detailed text, summarize it to 280 characters or less, and post as a tweet."""
-    try:
-        prompt_template = topic.get("prompt_template", "")
-        image_folder = topic.get("image_folder", None)
+class CryptoBot:
+    def __init__(self, config, twitter_api_v1, twitter_api_v2, openai_client):
+        self.config = config
+        self.twitter_api_v1 = twitter_api_v1
+        self.twitter_api_v2 = twitter_api_v2
+        self.openai_client = openai_client
+        self.topics = config.get("topics", [])
+        self.simulate_posting = config.get("simulate_posting", False)
 
-        if topic["name"] == "general_crypto":
-            topics = fetch_cryptopanic_topics()
-            if not topics:
-                logger.warning("No trending topics found. Using fallback.")
-                topics = ["The crypto market is full of surprises! 🚀"]
-            selected_topic = random.choice(topics)
-            prompt = prompt_template.replace("{TRENDING_TOPIC}", selected_topic)
-            logger.info(f"Selected topic for tweet: {selected_topic}")
-        else:
-            prompt = prompt_template
+    def generate_and_post_tweet(self, topic):
+        """Generate a detailed text, summarize it to 280 characters or less, and post as a tweet."""
+        try:
+            prompt_template = topic.get("prompt_template", "")
+            image_folder = topic.get("image_folder", None)
 
-        response_text = call_openai(prompt)
-
-        if not response_text:
-            logger.warning("OpenAI response failed. Using fallback.")
-            response_text = get_fallback_prompt(topic)
-
-        summarized_text = summarize_text(response_text)
-
-        if not summarized_text:
-            logger.warning("Summarization failed. Using fallback.")
-            summarized_text = get_fallback_prompt(topic)
-
-        image_path = select_random_image(image_folder)
-
-        # Append reference if applicable
-        reference = topic.get("reference", None)
-        if reference:
-            reference_type = random.choice(["contract", "twitter"])
-            reference_text = reference.get(reference_type, "")
-            if len(summarized_text) + len(reference_text) <= 280:
-                summarized_text += reference_text
-                logger.info(f"Updated tweet with reference: {summarized_text}")
+            if topic["name"] == "general_crypto":
+                topics = fetch_cryptopanic_topics()
+                if not topics:
+                    logger.warning("No trending topics found. Using fallback.")
+                    topics = ["Crypto is buzzing! Stay tuned for the latest updates. 🚀"]
+                selected_topic = random.choice(topics)
+                prompt = prompt_template.replace("{TRENDING_TOPIC}", selected_topic)
+                logger.info(f"Selected topic for tweet: {selected_topic}")
+                # Do NOT include images for general crypto tweets
+                image_path = None
             else:
-                max_length = 280 - len(reference_text)
-                summarized_text = summarized_text[:max_length] + reference_text
-                logger.info(f"Adjusted tweet to include reference: {summarized_text}")
+                prompt = prompt_template
+                # Only include images for Fedja tweets
+                if topic["name"] == "fedja_tweet":
+                    image_path = select_random_image(image_folder)
+                    if not image_path:
+                        logger.warning("No images found for Fedja tweet.")
+                        image_path = None
+                else:
+                    image_path = None
 
-        post_tweet(summarized_text, image_path, simulate_posting=simulate_posting)
+            response_text = call_openai(prompt)
 
+            if not response_text:
+                logger.warning("OpenAI response failed. Using fallback.")
+                response_text = get_fallback_prompt(topic)
+
+            summarized_text = summarize_text(response_text)
+
+            if not summarized_text:
+                logger.warning("Summarization failed. Using fallback.")
+                summarized_text = get_fallback_prompt(topic)
+
+            # Append reference if applicable
+            reference = topic.get("reference", None)
+            if reference:
+                reference_type = random.choice(["contract", "twitter"])
+                reference_text = reference.get(reference_type, "")
+                if len(summarized_text) + len(reference_text) <= 280:
+                    summarized_text += reference_text
+                    logger.info(f"Updated tweet with reference: {summarized_text}")
+                else:
+                    max_length = 280 - len(reference_text)
+                    summarized_text = summarized_text[:max_length] + reference_text
+                    logger.info(f"Adjusted tweet to include reference: {summarized_text}")
+
+            post_tweet(summarized_text, image_path, simulate_posting=self.simulate_posting)
+
+        except Exception as e:
+            logger.error(f"Error in generate_and_post_tweet: {e}")
+
+    def run_bot_once(self):
+        """Execute one iteration of the bot's tasks."""
+        try:
+            logger.info("Starting the bot for one iteration.")
+            # Randomly select a topic based on probabilities
+            selected_topic = random.choices(
+                [topic for topic in self.topics],
+                weights=[topic["probability"] for topic in self.topics]
+            )[0]
+            logger.info(f"Selected topic: {selected_topic['name']}")
+
+            self.generate_and_post_tweet(selected_topic)
+            logger.info("Bot iteration completed successfully.")
+        except Exception as e:
+            logger.error(f"Error in run_bot_once: {e}")
+
+    def run_bot_periodically(self):
+        """Run the bot periodically."""
+        while True:
+            try:
+                self.run_bot_once()
+                sleep_interval = random.randint(10800, 14400)
+                logger.info(f"Sleeping for {sleep_interval} seconds ({sleep_interval / 3600:.2f} hours)")
+                time.sleep(sleep_interval)
+            except Exception as e:
+                logger.error(f"Error in run_bot_periodically: {e}")
+
+def main():
+    try:
+        # Load configuration
+        with open('config.json', 'r') as config_file:
+            config = json.load(config_file)
+        
+        # Initialize bot
+        global bot
+        bot = CryptoBot(config, api_v1, client_v2, client)
+        
+        # Start Flask server in background thread
+        flask_thread = threading.Thread(target=start_flask, daemon=True)
+        flask_thread.start()
+        
+        # Check if running on Railway
+        if os.getenv('RAILWAY_SERVICE_NAME') is not None:
+            # For Railway, run the bot periodically in a background thread
+            bot_thread = threading.Thread(target=bot.run_bot_periodically, daemon=True)
+            bot_thread.start()
+        
+        # Keep the main thread alive
+        logger.info("Bot is running. Waiting for HTTP requests...")
+        while True:
+            time.sleep(60)  # Keep the main thread alive
     except Exception as e:
-        logger.error(f"Error in generate_and_post_tweet: {e}")
-
-def run_bot():
-    """Main bot loop."""
-    logger.info("Starting the bot (Live Twitter posting enabled).")
-
-    # Load configuration
-    with open('config.json', 'r') as config_file:
-        config = json.load(config_file)
-    topics = config.get("topics", [])
-    simulate_posting = config.get("simulate_posting", False)
-
-    while True:
-        # Randomly select a topic based on probabilities
-        selected_topic = random.choices([topic for topic in topics], weights=[topic["probability"] for topic in topics])[0]
-        logger.info(f"Selected topic: {selected_topic['name']}")
-
-        generate_and_post_tweet(selected_topic, simulate_posting=simulate_posting)
-
-        # Sleep for a random interval between 3 and 4 hours
-        sleep_interval = random.randint(10800, 14400)  # Random delay in seconds (3 to 4 hours)
-        logger.info(f"Sleeping for {sleep_interval} seconds ({sleep_interval / 3600:.2f} hours)")
-        time.sleep(sleep_interval)
+        logger.critical(f"Fatal error in main: {e}")
+        raise
 
 if __name__ == "__main__":
-    threading.Thread(target=start_flask, daemon=True).start()
-    run_bot()
+    main()

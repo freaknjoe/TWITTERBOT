@@ -1,0 +1,13 @@
+runtime: python39
+service: cryptobot
+
+env_variables:
+  TWITTER_API_KEY: 'your-api-key'
+  TWITTER_API_SECRET_KEY: 'your-api-secret'
+  TWITTER_ACCESS_TOKEN: 'your-access-token'
+  TWITTER_ACCESS_TOKEN_SECRET: 'your-access-token-secret'
+  OPENAI_API_KEY: 'your-openai-api-key'
+  CRYPTOPANIC_API_KEY: 'your-cryptopanic-api-key'
+
+automatic_scaling:
+  max_instances: 1
