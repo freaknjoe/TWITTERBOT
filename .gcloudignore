@@ -1,0 +1,18 @@
+# Ignore common unnecessary files
+.DS_Store
+.git
+.gitignore
+__pycache__
+node_modules
+venv
+*.log
+.env
+*.pyc
+
+# EXPLICITLY INCLUDE REQUIRED FILES
+!cloudbuild.yaml
+!Dockerfile
+!requirements.txt
+!app.yaml
+!app.py
+
