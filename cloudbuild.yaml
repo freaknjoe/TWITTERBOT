@@ -20,6 +20,4 @@ steps:
 # ✅ Set Build Options
 options:
   logging: CLOUD_LOGGING_ONLY  # Ensures logs are stored in Cloud Logging
-  logsBucket: "gs://my-cl-build-log"  # Custom storage bucket for build logs
-  machineType: 'E2_HIGHCPU_8'  # (Optional) Use a more powerful machine if needed
-  timeout: '1200s'  # (Optional) Extend timeout to 20 minutes if builds take longer
+timeout: '1200s'  # Extend timeout to 20 minutes (MOVED OUT OF OPTIONS)
