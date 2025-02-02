@@ -1,0 +1,13 @@
+{
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
+  },
+  "deploy": {
+    "startTimeout": 600,
+    "restartPolicy": {
+      "type": "ON_FAILURE",
+      "maxRetries": 5
+    }
+  }
+}

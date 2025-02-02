@@ -4,7 +4,7 @@ import time
 import logging
 import requests
 import json
-from flask import Flask
+from flask import Flask, jsonify
 import threading
 from openai import OpenAI
 import tweepy
@@ -29,6 +29,10 @@ def run_bot_endpoint():
         logger.error(f"Error executing bot via endpoint: {e}")
         return "Failed to execute bot.", 500
 
+@app.route('/health')
+def health_check():
+    return jsonify(status="OK"), 200
+
 def start_flask():
     port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
@@ -36,8 +40,8 @@ def start_flask():
 # Fetch credentials from environment variables
 API_KEY = os.getenv('TWITTER_API_KEY')
 API_SECRET_KEY = os.getenv('TWITTER_API_SECRET_KEY')
-ACCESS_TOKEN = os.getenv('TWITTER_ACCESS_TOKEN')
-ACCESS_TOKEN_SECRET = os.getenv('TWITTER_ACCESS_TOKEN_SECRET')
+ACCESS_TOKEN = os.getenv('ACCESS_TOKEN')
+ACCESS_TOKEN_SECRET = os.getenv('ACCESS_TOKEN_SECRET')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 CRYPTOPANIC_API_KEY = os.getenv('CRYPTOPANIC_API_KEY')
 
@@ -128,7 +132,7 @@ def summarize_text(text):
             
             if last_punctuation != -1:
                 # Use the furthest punctuation mark
-                end = max(last_period, last_exclamation, last_questions) + 1
+                end = max(last_period, last_exclamation, last_question) + 1
                 text = text[:end] + "..."
             else:
                 # If no sentence-ending punctuation is found, find the last space
@@ -150,15 +154,23 @@ def summarize_text(text):
         return None
 
 def select_random_image(image_folder):
-    """Select a random image from the specified image folder."""
+    """Select a random image from the specified image folder or subfolder."""
     try:
         if not image_folder:
             logger.warning("No image folder specified.")
             return None
 
-        images = [os.path.join(image_folder, img) for img in os.listdir(image_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
+        # Check if image_folder is a subfolder within the 'images' directory
+        base_images_dir = 'images'
+        full_image_folder = os.path.join(base_images_dir, image_folder)
+
+        if not os.path.isdir(full_image_folder):
+            logger.warning(f"Image folder {full_image_folder} does not exist.")
+            return None
+
+        images = [os.path.join(full_image_folder, img) for img in os.listdir(full_image_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
         if not images:
-            logger.warning("No images found in the folder.")
+            logger.warning(f"No images found in the folder: {full_image_folder}.")
             return None
         return random.choice(images)
     except Exception as e:
@@ -364,20 +376,25 @@ def main():
         global bot
         bot = CryptoBot(config, api_v1, client_v2, client)
         
-        # Start Flask server in background thread
-        flask_thread = threading.Thread(target=start_flask, daemon=True)
-        flask_thread.start()
+        # Check if running in Cloud Run or Railway
+        is_cloud = os.getenv('K_SERVICE') or os.getenv('RAILWAY_SERVICE_NAME')
         
-        # Check if running on Railway
-        if os.getenv('RAILWAY_SERVICE_NAME') is not None:
-            # For Railway, run the bot periodically in a background thread
+        if is_cloud:
+            # For Cloud Run/Railway, run the Flask server as the main process
+            port = int(os.getenv("PORT", 8080))
+            app.run(host='0.0.0.0', port=port, debug=False)
+        else:
+            # For local development, start Flask server and bot threads
+            flask_thread = threading.Thread(target=start_flask, daemon=True)
+            flask_thread.start()
+            
             bot_thread = threading.Thread(target=bot.run_bot_periodically, daemon=True)
             bot_thread.start()
-        
-        # Keep the main thread alive
-        logger.info("Bot is running. Waiting for HTTP requests...")
-        while True:
-            time.sleep(60)  # Keep the main thread alive
+            
+            logger.info("Running locally. Waiting for HTTP requests or background execution...")
+            while True:
+                time.sleep(60)  # Keep the main thread alive locally
+
     except Exception as e:
         logger.critical(f"Fatal error in main: {e}")
         raise
